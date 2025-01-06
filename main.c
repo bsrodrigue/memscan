@@ -254,7 +254,7 @@ void initial_scan(const pid_t pid, const PMRegionArray regions, const int target
             const long data = ptrace(PTRACE_PEEKDATA, pid, start, NULL);
 
             if (data == target) {
-                printf("Found %d at 0x%lx\n", target, start);
+                // printf("Found %d at 0x%lx\n", target, start);
                 ulong_array_insert(offset_array, start);
             }
 

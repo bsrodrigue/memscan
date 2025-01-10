@@ -1,11 +1,11 @@
+#include <fcntl.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
-#include <fcntl.h>
 #include <string.h>
-#include <stdbool.h>
 #include <sys/ptrace.h>
 #include <sys/wait.h>
+#include <unistd.h>
 
 void exit_error(const char *msg) {
     perror(msg);
@@ -43,10 +43,12 @@ PMRegionArray pmregion_array_create(const size_t capacity) {
     return pmregion_array;
 };
 
-void pmregion_array_insert(PMRegionArray *array, const ProcessMemoryRegion region) {
+void pmregion_array_insert(PMRegionArray *array,
+                           const ProcessMemoryRegion region) {
     if (array->size >= array->capacity) {
         array->capacity *= 2;
-        ProcessMemoryRegion *regions = realloc(array->regions, array->capacity * sizeof(ProcessMemoryRegion));
+        ProcessMemoryRegion *regions =
+                realloc(array->regions, array->capacity * sizeof(ProcessMemoryRegion));
 
         if (array->regions == NULL) {
             exit_error("Error allocating memory regions");
@@ -59,7 +61,7 @@ void pmregion_array_insert(PMRegionArray *array, const ProcessMemoryRegion regio
     array->size++;
 }
 
-void pmregion_array_destroy(const PMRegionArray* pmregion_array) {
+void pmregion_array_destroy(const PMRegionArray *pmregion_array) {
     free(pmregion_array->regions);
 }
 
@@ -71,7 +73,9 @@ void print_memory_region(const ProcessMemoryRegion region) {
     printf("%c", region.permission.read ? 'r' : '-'); // Read permission
     printf("%c", region.permission.write ? 'w' : '-'); // Write permission
     printf("%c", region.permission.execute ? 'x' : '-'); // Execute permission
-    printf("%c", region.permission.shared ? 's' : 'p'); // Shared/Private (s = shared, p = private)
+    printf("%c", region.permission.shared
+                     ? 's'
+                     : 'p'); // Shared/Private (s = shared, p = private)
 
     printf("]\n");
 }
@@ -91,14 +95,13 @@ ULongArray ulong_array_create(const size_t capacity) {
     return array;
 }
 
-void ulong_array_destroy(const ULongArray *array) {
-    free(array->items);
-}
+void ulong_array_destroy(const ULongArray *array) { free(array->items); }
 
 void ulong_array_insert(ULongArray *array, const unsigned long item) {
     if (array->size >= array->capacity) {
         array->capacity *= 2;
-        unsigned long *items = realloc(array->items, array->capacity * sizeof(unsigned long));
+        unsigned long *items =
+                realloc(array->items, array->capacity * sizeof(unsigned long));
 
         if (items == NULL) {
             perror("reallocate");
@@ -112,9 +115,7 @@ void ulong_array_insert(ULongArray *array, const unsigned long item) {
     array->size++;
 }
 
-void ulong_array_clear(ULongArray *array) {
-    array->size = 0;
-}
+void ulong_array_clear(ULongArray *array) { array->size = 0; }
 
 typedef struct {
     ssize_t size;
@@ -131,9 +132,7 @@ String string_create(const ssize_t capacity) {
     return array;
 }
 
-void string_destroy(const String *string) {
-    free(string->str);
-}
+void string_destroy(const String *string) { free(string->str); }
 
 void string_insert(String *string, const char *item) {
     if (string->size == string->capacity) {
@@ -181,7 +180,8 @@ void read_process_memory(String *string, const pid_t pid) {
 
 ssize_t read_line(const char *str, char *buffer) {
     ssize_t bytes_read = 0;
-    if (*str == '\0') return bytes_read;
+    if (*str == '\0')
+        return bytes_read;
     do {
         *buffer++ = *str++;
         bytes_read++;
@@ -193,24 +193,18 @@ ssize_t read_line(const char *str, char *buffer) {
 }
 
 MemoryPermission parse_permissions(const char *perm_str) {
-    MemoryPermission permissions = {
-        .read = false,
-        .write = false,
-        .execute = false,
-        .private = false,
-        .shared = false,
-    };
-
     if (strlen(perm_str) != 4) {
         perror("permissions");
         exit(EXIT_FAILURE);
     }
 
-    permissions.read = perm_str[0] == 'r';
-    permissions.write = perm_str[1] == 'w';
-    permissions.execute = perm_str[2] == 'x';
-    permissions.private = perm_str[3] == 'p';
-    permissions.shared = perm_str[3] == 's';
+    const MemoryPermission permissions = {
+        .read = perm_str[0] == 'r',
+        .write = perm_str[1] == 'w',
+        .execute = perm_str[2] == 'x',
+        .private = perm_str[3] == 'p',
+        .shared = perm_str[3] == 's',
+    };
 
     return permissions;
 }
@@ -242,8 +236,8 @@ void regions_fill(PMRegionArray *regions, String *process_map) {
     }
 }
 
-void initial_scan(const pid_t pid, const PMRegionArray regions, const int target,
-                  ULongArray *offset_array) {
+void initial_scan(const pid_t pid, const PMRegionArray regions,
+                  const int target, ULongArray *offset_array) {
     for (ssize_t i = 0; i < regions.size; i++) {
         unsigned long start = regions.regions[i].start;
         const unsigned long end = regions.regions[i].end;
@@ -258,18 +252,18 @@ void initial_scan(const pid_t pid, const PMRegionArray regions, const int target
                 ulong_array_insert(offset_array, start);
             }
 
-            start += 8;
+            start += sizeof(target);
         }
     }
 }
 
-ULongArray next_scan(const pid_t pid, const int target, const ULongArray *offset_array) {
+ULongArray next_scan(const pid_t pid, const int target,
+                     const ULongArray *offset_array) {
     ULongArray filtered_offsets = ulong_array_create(1000);
 
-    ssize_t count = 0;
-    // printf("Scanning...\n");
     for (ssize_t i = 0; i < offset_array->size; i++) {
-        const long data = ptrace(PTRACE_PEEKDATA, pid, offset_array->items[i], NULL);
+        const long data =
+                ptrace(PTRACE_PEEKDATA, pid, offset_array->items[i], NULL);
 
         if (data == target) {
             printf("Found %d at 0x%lx\n", target, offset_array->items[i]);
@@ -283,11 +277,23 @@ ULongArray next_scan(const pid_t pid, const int target, const ULongArray *offset
 void look(const pid_t pid, const unsigned long offset) {
     const long data = ptrace(PTRACE_PEEKDATA, pid, offset, NULL);
 
-    printf("Value at 0x%lx: %ld\n", offset, data);
+    printf("Value at 0x%lx: %d\n", offset, (int) data);
 }
 
 void update(const pid_t pid, const unsigned long offset, const int value) {
-    ptrace(PTRACE_POKEDATA, pid, offset, value);
+    const long original = ptrace(PTRACE_PEEKDATA, pid, offset, NULL);
+
+    if (original == -1) {
+        exit_error("Error reading from process file");
+    }
+
+    const long patched = (original & ~0xFFFFFFFFL) | (value & 0xFFFFFFFFL);
+
+    const long result = ptrace(PTRACE_POKEDATA, pid, offset, patched);
+
+    if (result == -1) {
+        exit_error("Error patching value");
+    }
 
     printf("Set new value %d at 0x%lx\n", value, offset);
 }
@@ -333,10 +339,9 @@ int main(const int argc, const char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-
     while (true) {
         char command_buffer[256];
-        printf("[memscan]_> ");
+        printf("[memsniffer]>_ ");
 
         fgets(command_buffer, sizeof(command_buffer), stdin);
 
@@ -367,7 +372,8 @@ int main(const int argc, const char *argv[]) {
                 printf("Looking for next value: %s\n", target_str);
                 const ULongArray filtered = next_scan(pid, target, &offset_array);
 
-                memcpy(offset_array.items, filtered.items, filtered.size * (sizeof(unsigned long)));
+                memcpy(offset_array.items, filtered.items,
+                       filtered.size * (sizeof(unsigned long)));
 
                 offset_array.size = filtered.size;
             } else if (strcmp("look", command) == 0) {

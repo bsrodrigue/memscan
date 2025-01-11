@@ -6,10 +6,63 @@
 #include <sys/ptrace.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <ctype.h>
 
 void exit_error(const char *msg) {
     perror(msg);
     exit(EXIT_FAILURE);
+}
+
+void to_lowercase(char *s) {
+    while (*s != '\0') {
+        *s = (char) tolower(*s);
+        s++;
+    }
+}
+
+typedef enum {
+    INT8,
+    INT16,
+    INT32,
+    INT64,
+
+    UNKNOWN,
+} ValueType;
+
+ValueType parse_argtype(char *type_str) {
+    to_lowercase(type_str);
+
+    if (strcmp(type_str, "int8") == 0) {
+        return INT8;
+    }
+    if (strcmp(type_str, "int16") == 0) {
+        return INT16;
+    }
+    if (strcmp(type_str, "int32") == 0) {
+        return INT32;
+    }
+    if (strcmp(type_str, "int64") == 0) {
+        return INT64;
+    }
+
+    exit_error("Invalid type");
+    return UNKNOWN;
+}
+
+size_t get_byte_count(const ValueType type) {
+    switch (type) {
+        case INT8:
+            return sizeof(int8_t);
+        case INT16:
+            return sizeof(int16_t);
+        case INT32:
+            return sizeof(int32_t);
+        case INT64:
+            return sizeof(int64_t);
+        default:
+            exit_error("Invalid type");
+            return 0;
+    }
 }
 
 typedef struct {
@@ -236,37 +289,91 @@ void regions_fill(PMRegionArray *regions, String *process_map) {
     }
 }
 
+long mask_data(long data, const size_t byte_count) {
+    if (byte_count == 1) {
+        data &= 0xFFL;
+    } else if (byte_count == 2) {
+        data &= 0xFFFFL;
+    } else if (byte_count == 4) {
+        data &= 0xFFFFFFFFL;
+    } else if (byte_count == 8) {
+        data &= 0xFFFFFFFFFFFFFFFFL;
+    }
+
+    return data;
+}
+
+long patch_byte(const long original, const long value) {
+    return (original & ~0xFFL) | (value & 0xFFL);
+}
+
+long patch_hword(const long original, const long value) {
+    return (original & ~0xFFFFL) | (value & 0xFFFFL);
+}
+
+long patch_word(const long original, const long value) {
+    return (original & ~0xFFFFFFFFL) | (value & 0xFFFFFFFFL);
+}
+
+long patch_dword(const long original, const long value) {
+    return (original & ~0xFFFFFFFFFFFFFFFFL) | (value & 0xFFFFFFFFFFFFFFFFL);
+}
+
+long patch_data(const long original, const long value, const size_t byte_count) {
+    if (byte_count == 1) {
+        return patch_byte(original, value);
+    }
+    if (byte_count == 2) {
+        return patch_hword(original, value);
+    }
+    if (byte_count == 4) {
+        return patch_word(original, value);
+    }
+    if (byte_count == 8) {
+        return patch_dword(original, value);
+    }
+    exit_error("Invalid patch data size");
+    return 0;
+}
+
 void initial_scan(const pid_t pid, const PMRegionArray regions,
-                  const int target, ULongArray *offset_array) {
+                  const long target, ULongArray *offset_array, const ValueType type) {
+    const size_t byte_count = get_byte_count(type);
+
     for (ssize_t i = 0; i < regions.size; i++) {
         unsigned long start = regions.regions[i].start;
         const unsigned long end = regions.regions[i].end;
 
         // printf("Scanning from 0x%lx -> 0x%lx\n", start, end);
 
+        // TODO: Optimize this later by comparing slices of data instead of stepping by byte_count
         while (start < end) {
-            const long data = ptrace(PTRACE_PEEKDATA, pid, start, NULL);
+            long data = ptrace(PTRACE_PEEKDATA, pid, start, NULL);
 
+            data = mask_data(data, byte_count);
             if (data == target) {
-                // printf("Found %d at 0x%lx\n", target, start);
+                // printf("Found %ld at 0x%lx\n", target, start);
                 ulong_array_insert(offset_array, start);
             }
 
-            start += sizeof(target);
+            start += byte_count;
         }
     }
 }
 
-ULongArray next_scan(const pid_t pid, const int target,
-                     const ULongArray *offset_array) {
+ULongArray next_scan(const pid_t pid, const long target,
+                     const ULongArray *offset_array, const ValueType type) {
     ULongArray filtered_offsets = ulong_array_create(1000);
+    const size_t byte_count = get_byte_count(type);
 
     for (ssize_t i = 0; i < offset_array->size; i++) {
-        const long data =
+        long data =
                 ptrace(PTRACE_PEEKDATA, pid, offset_array->items[i], NULL);
 
+        data = mask_data(data, byte_count);
+
         if (data == target) {
-            printf("Found %d at 0x%lx\n", target, offset_array->items[i]);
+            printf("Found %ld at 0x%lx\n", target, offset_array->items[i]);
             ulong_array_insert(&filtered_offsets, offset_array->items[i]);
         }
     }
@@ -274,20 +381,38 @@ ULongArray next_scan(const pid_t pid, const int target,
     return filtered_offsets;
 }
 
-void look(const pid_t pid, const unsigned long offset) {
-    const long data = ptrace(PTRACE_PEEKDATA, pid, offset, NULL);
+void look(const pid_t pid, const unsigned long offset, const ValueType type) {
+    long data = ptrace(PTRACE_PEEKDATA, pid, offset, NULL);
 
-    printf("Value at 0x%lx: %d\n", offset, (int) data);
+    data = mask_data(data, type);
+
+    switch (type) {
+        case INT8:
+            printf("Value at 0x%lx: %d\n", offset, (char) data);
+            break;
+        case INT16:
+            printf("Value at 0x%lx: %d\n", offset, (short) data);
+            break;
+        case INT32:
+            printf("Value at 0x%lx: %d\n", offset, (int) data);
+            break;
+        case INT64:
+            printf("Value at 0x%lx: %ld\n", offset, data);
+            break;
+        default:
+            printf("Invalid type\n");
+    }
 }
 
-void update(const pid_t pid, const unsigned long offset, const int value) {
+void update(const pid_t pid, const unsigned long offset, const long value, const ValueType type) {
     const long original = ptrace(PTRACE_PEEKDATA, pid, offset, NULL);
 
     if (original == -1) {
         exit_error("Error reading from process file");
     }
 
-    const long patched = (original & ~0xFFFFFFFFL) | (value & 0xFFFFFFFFL);
+    const size_t byte_count = get_byte_count(type);
+    const long patched = patch_data(original, value, byte_count);
 
     const long result = ptrace(PTRACE_POKEDATA, pid, offset, patched);
 
@@ -295,7 +420,7 @@ void update(const pid_t pid, const unsigned long offset, const int value) {
         exit_error("Error patching value");
     }
 
-    printf("Set new value %d at 0x%lx\n", value, offset);
+    printf("Set new value %ld at 0x%lx\n", value, offset);
 }
 
 pid_t get_pid(const char *process_name) {
@@ -326,6 +451,7 @@ int main(const int argc, const char *argv[]) {
 
     const char *process_name = argv[1];
     const pid_t pid = get_pid(process_name);
+    // const pid_t pid = atoi(process_name);
 
     String process_memory_map = string_create(1024);
     PMRegionArray regions = pmregion_array_create(1024);
@@ -339,9 +465,18 @@ int main(const int argc, const char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
+    ValueType current_type = UNKNOWN;
+
     while (true) {
         char command_buffer[256];
         printf("[memsniffer]>_ ");
+
+        // Commands:
+        // new <type> <value>
+        // next <value>
+        // look <type> <region>
+        // update <type> <region> <value>
+        // exit
 
         fgets(command_buffer, sizeof(command_buffer), stdin);
 
@@ -360,34 +495,45 @@ int main(const int argc, const char *argv[]) {
         if (WIFSTOPPED(status)) {
             if (strcmp("new", command) == 0) {
                 ulong_array_clear(&offset_array);
-                const char *target_str = strtok(NULL, " ");
-                const int target = atoi(target_str);
 
-                printf("Looking for new value: %s\n", target_str);
-                initial_scan(pid, regions, target, &offset_array);
+                char *type_str = strtok(NULL, " ");
+                const char *target_str = strtok(NULL, " ");
+
+                current_type = parse_argtype(type_str);
+                const long target = strtol(target_str, NULL, 10);
+
+                printf("Looking for new %s value: %s\n", type_str, target_str);
+                initial_scan(pid, regions, target, &offset_array, current_type);
             } else if (strcmp("next", command) == 0) {
                 const char *target_str = strtok(NULL, " ");
-                const int target = atoi(target_str);
+                const long target = strtol(target_str, NULL, 10);
 
                 printf("Looking for next value: %s\n", target_str);
-                const ULongArray filtered = next_scan(pid, target, &offset_array);
+                const ULongArray filtered = next_scan(pid, target, &offset_array, current_type);
 
                 memcpy(offset_array.items, filtered.items,
                        filtered.size * (sizeof(unsigned long)));
 
                 offset_array.size = filtered.size;
             } else if (strcmp("look", command) == 0) {
+                char *type_str = strtok(NULL, " ");
                 const char *offset_str = strtok(NULL, " ");
                 const unsigned long offset = strtoul(offset_str, NULL, 16);
-                look(pid, offset);
+
+                const ValueType type = parse_argtype(type_str);
+
+                look(pid, offset, type);
             } else if (strcmp("update", command) == 0) {
+                char *type_str = strtok(NULL, " ");
+                const ValueType type = parse_argtype(type_str);
+
                 const char *offset_str = strtok(NULL, " ");
                 const unsigned long offset = strtoul(offset_str, NULL, 16);
 
                 const char *value_str = strtok(NULL, " ");
-                const int value = atoi(value_str);
+                const long value = strtol(value_str, NULL, 10);
 
-                update(pid, offset, value);
+                update(pid, offset, value, type);
             } else if (strcmp("exit", command) == 0) {
                 ptrace(PTRACE_DETACH, pid, NULL, NULL);
                 printf("Exiting...\n");

@@ -7,6 +7,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <pthread.h>
 
 void exit_error(const char *msg) {
     perror(msg);
@@ -25,6 +26,8 @@ typedef enum {
     INT16,
     INT32,
     INT64,
+
+    STRING,
 
     UNKNOWN,
 } ValueType;
@@ -171,8 +174,8 @@ void ulong_array_insert(ULongArray *array, const unsigned long item) {
 void ulong_array_clear(ULongArray *array) { array->size = 0; }
 
 typedef struct {
-    ssize_t size;
-    ssize_t capacity;
+    size_t size;
+    size_t capacity;
     char *str;
 } String;
 
@@ -202,6 +205,13 @@ void string_insert(String *string, const char *item) {
 
     string->str[string->size] = *item;
     string->size++;
+}
+
+void string_from_chars(String *string, const char *str) {
+    while (*str != '\0') {
+        string_insert(string, str);
+        str++;
+    }
 }
 
 void string_readfile(String *string, const char *filename) {
@@ -361,6 +371,28 @@ void initial_scan(const pid_t pid, const PMRegionArray regions,
     }
 }
 
+void initial_scan_str(const pid_t pid, const PMRegionArray regions,
+                      const String string, ULongArray *offset_array) {
+
+    for (ssize_t i = 0; i < regions.size; i++) {
+        unsigned long start = regions.regions[i].start;
+        const unsigned long end = regions.regions[i].end;
+        const size_t string_len = string.size;
+
+        // TODO: Optimize this later by comparing slices of data instead of stepping by byte_count
+        while (start < end) {
+            long data = ptrace(PTRACE_PEEKDATA, pid, start, NULL);
+
+            // if (data == target) {
+            //     // printf("Found %ld at 0x%lx\n", target, start);
+            //     ulong_array_insert(offset_array, start);
+            // }
+
+            start += 8;
+        }
+    }
+}
+
 ULongArray next_scan(const pid_t pid, const long target,
                      const ULongArray *offset_array, const ValueType type) {
     ULongArray filtered_offsets = ulong_array_create(1000);
@@ -443,6 +475,13 @@ pid_t get_pid(const char *process_name) {
     return pid;
 }
 
+typedef struct {
+    int *numbers;
+    int start;
+    int end;
+    int id;
+} Arguments;
+
 int main(const int argc, const char *argv[]) {
     if (argc != 2) {
         fprintf(stderr, "Usage: %s <process_name>\n", argv[0]);
@@ -498,12 +537,18 @@ int main(const int argc, const char *argv[]) {
 
                 char *type_str = strtok(NULL, " ");
                 const char *target_str = strtok(NULL, " ");
+                printf("Looking for new %s value: %s\n", type_str, target_str);
 
                 current_type = parse_argtype(type_str);
-                const long target = strtol(target_str, NULL, 10);
 
-                printf("Looking for new %s value: %s\n", type_str, target_str);
-                initial_scan(pid, regions, target, &offset_array, current_type);
+                if (current_type == STRING) {
+                    String string = string_create(1024);
+                    string_from_chars(&string, target_str);
+                    initial_scan_str(pid, regions, string, &offset_array);
+                } else {
+                    const long target = strtol(target_str, NULL, 10);
+                    initial_scan(pid, regions, target, &offset_array, current_type);
+                }
             } else if (strcmp("next", command) == 0) {
                 const char *target_str = strtok(NULL, " ");
                 const long target = strtol(target_str, NULL, 10);

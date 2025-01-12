@@ -26,7 +26,6 @@ async function main(){
     const strNumber = await input("Enter a new number: ");
     numView[0] = parseInt(strNumber);
   }
-
 }
 
 main();

@@ -1,13 +1,13 @@
 function input(message) {
   return new Promise((resolve) => {
     process.stdout.write(message);
-    process.stdin.once('data', (data) => {
+    process.stdin.once("data", (data) => {
       resolve(data.toString().trim());
     });
   });
 }
 
-async function main(){
+async function main() {
   const args = process.argv;
   console.log(`Process ID: ${process.pid}`);
 

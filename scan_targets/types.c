@@ -3,7 +3,7 @@
 
 int main(int argc, char *argv[]) {
   char buffer[256];
-  float a = 127.99;
+  double a = 127.99;
 
   while (1) {
     printf("Change the value of a\n: ");

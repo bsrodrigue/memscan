@@ -38,6 +38,10 @@ typedef enum {
   UINT32,
   UINT64,
 
+  // Floats
+  FLOAT32,  // Single Precision
+  DOUBLE64, // Double Precision
+
   STRING,
 
   UNKNOWN,
@@ -74,6 +78,14 @@ ValueType parse_argtype(char *type_str) {
     return UINT64;
   }
 
+  // Decimals
+  if (strcmp(type_str, "float32") == 0) {
+    return FLOAT32;
+  }
+  if (strcmp(type_str, "double64") == 0) {
+    return DOUBLE64;
+  }
+
   exit_error("Invalid type");
   return UNKNOWN;
 }
@@ -88,9 +100,11 @@ size_t get_byte_count(const ValueType type) {
     return sizeof(int16_t);
   case INT32:
   case UINT32:
+  case FLOAT32:
     return sizeof(int32_t);
   case INT64:
   case UINT64:
+  case DOUBLE64:
     return sizeof(int64_t);
 
   case STRING:
@@ -415,6 +429,39 @@ void initial_scan(const pid_t pid, const PMRegionArray regions,
   }
 }
 
+void initial_scan_ld(const pid_t pid, const PMRegionArray regions,
+                  const double target, ULongArray *offset_array,
+                  const ValueType type) {
+  const size_t byte_count = get_byte_count(type);
+
+  for (ssize_t i = 0; i < regions.size; i++) {
+    unsigned long start = regions.regions[i].start;
+    const unsigned long end = regions.regions[i].end;
+
+    // TODO: Optimize this later by comparing slices of data instead of stepping
+    // by byte_count
+    while (start < end) {
+      long data = ptrace(PTRACE_PEEKDATA, pid, start, NULL);
+
+      data = mask_data(data, byte_count);
+
+      double ldvalue;
+      memcpy(&ldvalue, &data, sizeof(double));
+
+      const double masked_target = mask_data(target, byte_count);
+
+      printf("%f\n", masked_target);
+
+      if (ldvalue == masked_target) {
+        printf("Found %f at 0x%lx\n", masked_target, start);
+        ulong_array_insert(offset_array, start);
+      }
+
+      start += byte_count;
+    }
+  }
+}
+
 void initial_scan_str(const pid_t pid, const PMRegionArray regions,
                       const String string, ULongArray *offset_array) {
 
@@ -476,6 +523,32 @@ void look(const pid_t pid, const unsigned long offset, const ValueType type) {
   case INT64:
     printf("Value at 0x%lx: %ld\n", offset, data);
     break;
+
+  case UINT8:
+    printf("Value at 0x%lx: %u\n", offset, (unsigned char)data);
+    break;
+  case UINT16:
+    printf("Value at 0x%lx: %u\n", offset, (unsigned short)data);
+    break;
+  case UINT32:
+    printf("Value at 0x%lx: %u\n", offset, (unsigned int)data);
+    break;
+  case UINT64:
+    printf("Value at 0x%lx: %lu\n", offset, (unsigned long)data);
+    break;
+
+  case FLOAT32: {
+    float fvalue;
+    memcpy(&fvalue, &data, sizeof(float));
+    printf("Value at 0x%lx: %f\n", offset, fvalue);
+    break;
+  }
+  case DOUBLE64: {
+    double dvalue;
+    memcpy(&dvalue, &data, sizeof(double));
+    printf("Value at 0x%lx: %f\n", offset, dvalue);
+    break;
+  }
   default:
     printf("Invalid type\n");
   }
@@ -543,8 +616,8 @@ int main(const int argc, const char *argv[]) {
   }
 
   const char *process_name = argv[1];
-  // const pid_t pid = get_pid(process_name);
-  const pid_t pid = atoi(process_name);
+  const pid_t pid = get_pid(process_name);
+  // const pid_t pid = atoi(process_name);
 
   String process_memory_map = string_create(INITIAL_CAPACITY);
   PMRegionArray regions = pmregion_array_create(INITIAL_CAPACITY);
@@ -603,8 +676,16 @@ int main(const int argc, const char *argv[]) {
           String string = string_create(1024);
           string_from_chars(&string, target_str);
           initial_scan_str(pid, regions, string, &offset_array);
-        } else {
+        }
+
+        else if (current_type == FLOAT32 || current_type == DOUBLE64) {
+          const double target_double = strtod(target_str, NULL);
+          initial_scan_ld(pid, regions, target_double, &offset_array, current_type);
+        }
+
+        else {
           const long target = strtol(target_str, NULL, 10);
+
           initial_scan(pid, regions, target, &offset_array, current_type);
         }
       } else if (strcmp("next", command) == 0) {
@@ -628,12 +709,12 @@ int main(const int argc, const char *argv[]) {
 
         look(pid, offset, type);
       } else if (strcmp("lookall", command) == 0) {
-          char *type_str = strtok(NULL, " ");
-          const ValueType type = parse_argtype(type_str);
+        char *type_str = strtok(NULL, " ");
+        const ValueType type = parse_argtype(type_str);
 
-          for (int i = 0 ; i < offset_array.size ; i++) {
-              look(pid, offset_array.items[i], type);
-          }
+        for (int i = 0; i < offset_array.size; i++) {
+          look(pid, offset_array.items[i], type);
+        }
       } else if (strcmp("update", command) == 0) {
         char *type_str = strtok(NULL, " ");
         const ValueType type = parse_argtype(type_str);

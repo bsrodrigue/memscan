@@ -1,4 +1,3 @@
-#include <ctype.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <stdbool.h>
@@ -10,85 +9,11 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "globals.h"
+#include "strings.h"
+#include "value_type.h"
+
 #define INITIAL_CAPACITY 4096 * 4096 // 16MB
-#define GROWTH_FACTOR 2
-
-void exit_error(const char *msg) {
-  perror(msg);
-  exit(EXIT_FAILURE);
-}
-
-void to_lowercase(char *s) {
-  while (*s != '\0') {
-    *s = (char)tolower(*s);
-    s++;
-  }
-}
-
-typedef enum {
-  // Signed Integers
-  INT8,
-  INT16,
-  INT32,
-  INT64,
-
-  // Unsigned Integers
-  UINT8,
-  UINT16,
-  UINT32,
-  UINT64,
-
-  // Floats
-  FLOAT32,  // Single Precision
-  DOUBLE64, // Double Precision
-
-  STRING,
-
-  UNKNOWN,
-} ValueType;
-
-ValueType parse_argtype(char *type_str) {
-  to_lowercase(type_str);
-
-  // Signed Integers
-  if (strcmp(type_str, "int8") == 0) {
-    return INT8;
-  }
-  if (strcmp(type_str, "int16") == 0) {
-    return INT16;
-  }
-  if (strcmp(type_str, "int32") == 0) {
-    return INT32;
-  }
-  if (strcmp(type_str, "int64") == 0) {
-    return INT64;
-  }
-
-  // Unsigned Integers
-  if (strcmp(type_str, "uint8") == 0) {
-    return UINT8;
-  }
-  if (strcmp(type_str, "uint16") == 0) {
-    return UINT16;
-  }
-  if (strcmp(type_str, "uint32") == 0) {
-    return UINT32;
-  }
-  if (strcmp(type_str, "uint64") == 0) {
-    return UINT64;
-  }
-
-  // Decimals
-  if (strcmp(type_str, "float32") == 0) {
-    return FLOAT32;
-  }
-  if (strcmp(type_str, "double64") == 0) {
-    return DOUBLE64;
-  }
-
-  exit_error("Invalid type");
-  return UNKNOWN;
-}
 
 size_t get_byte_count(const ValueType type) {
   switch (type) {
@@ -227,66 +152,6 @@ void ulong_array_insert(ULongArray *array, const unsigned long item) {
 }
 
 void ulong_array_clear(ULongArray *array) { array->size = 0; }
-
-typedef struct {
-  size_t size;
-  size_t capacity;
-  char *str;
-} String;
-
-String string_create(const ssize_t capacity) {
-  String array;
-  array.capacity = capacity;
-  array.size = 0;
-  array.str = malloc(capacity * sizeof(char));
-
-  return array;
-}
-
-void string_destroy(const String *string) { free(string->str); }
-
-void string_insert(String *string, const char *item) {
-  if (string->size == string->capacity) {
-    string->capacity *= GROWTH_FACTOR;
-    char *buf = realloc(string->str, string->capacity);
-
-    if (buf == NULL) {
-      perror("reallocate");
-      exit(EXIT_FAILURE);
-    }
-
-    string->str = buf;
-  }
-
-  string->str[string->size] = *item;
-  string->size++;
-}
-
-void string_from_chars(String *string, const char *str) {
-  while (*str != '\0') {
-    string_insert(string, str);
-    str++;
-  }
-}
-
-void string_readfile(String *string, const char *filename) {
-  const int fd = open(filename, O_RDONLY);
-
-  if (fd == -1) {
-    perror("open");
-  }
-
-  char read_buf[1];
-
-  ssize_t bytes_read;
-  while ((bytes_read = read(fd, read_buf, 1)) != 0) {
-    if (bytes_read == -1) {
-      exit_error("Error reading from process file");
-    }
-
-    string_insert(string, read_buf);
-  }
-}
 
 void read_process_memory(String *string, const pid_t pid) {
   char proc_file_path[256];

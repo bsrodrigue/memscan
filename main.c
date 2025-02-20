@@ -295,8 +295,8 @@ void initial_scan(const pid_t pid, const PMRegionArray regions,
 }
 
 void initial_scan_ld(const pid_t pid, const PMRegionArray regions,
-                  const double target, ULongArray *offset_array,
-                  const ValueType type) {
+                     const double target, ULongArray *offset_array,
+                     const ValueType type) {
   const size_t byte_count = get_byte_count(type);
 
   for (ssize_t i = 0; i < regions.size; i++) {
@@ -545,7 +545,8 @@ int main(const int argc, const char *argv[]) {
 
         else if (current_type == FLOAT32 || current_type == DOUBLE64) {
           const double target_double = strtod(target_str, NULL);
-          initial_scan_ld(pid, regions, target_double, &offset_array, current_type);
+          initial_scan_ld(pid, regions, target_double, &offset_array,
+                          current_type);
         }
 
         else {

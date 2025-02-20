@@ -1,2 +1,2 @@
 all:
-	gcc -g main.c -o memsniffer
+	gcc -g *.c -o memsniffer

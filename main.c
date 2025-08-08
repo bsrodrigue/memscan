@@ -522,6 +522,7 @@ int main(const int argc, const char *argv[]) {
     int status = 0;
 
     ptrace(PTRACE_INTERRUPT, pid, NULL, NULL);
+
     if (waitpid(pid, &status, 0) == -1) {
       perror("waitpid");
       exit(EXIT_FAILURE);

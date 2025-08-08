@@ -1,10 +1,10 @@
-#include <ctype.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include "globals.h"
 #include "strings.h"
+#include "globals.h"
+#include <ctype.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
 
 void to_lowercase(char *s) {
   while (*s != '\0') {
@@ -58,6 +58,8 @@ void string_readfile(String *string, const char *filename) {
   char read_buf[1];
 
   ssize_t bytes_read;
+
+  // This is poorly optimized as fuck
   while ((bytes_read = read(fd, read_buf, 1)) != 0) {
     if (bytes_read == -1) {
       exit_error("Error reading from process file");
